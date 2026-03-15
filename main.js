@@ -122,6 +122,18 @@ class Game {
 
     checkCollision(nextPos) {
         const pSize = PLAYER_SIZE / 2;
+
+        // --- マップ境界外への移動を制限 ---
+        const mapMinX = -BLOCK_SIZE / 2;
+        const mapMaxX = (MAP_DATA[0].length - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
+        const mapMinZ = -BLOCK_SIZE / 2;
+        const mapMaxZ = (MAP_DATA.length - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
+
+        if (nextPos.x - pSize < mapMinX || nextPos.x + pSize > mapMaxX ||
+            nextPos.z - pSize < mapMinZ || nextPos.z + pSize > mapMaxZ) {
+            return true; // マップ外は衝突として扱う
+        }
+
         for (const block of this.blocks) {
             const minX = block.x * BLOCK_SIZE - BLOCK_SIZE / 2;
             const maxX = block.x * BLOCK_SIZE + BLOCK_SIZE / 2;
