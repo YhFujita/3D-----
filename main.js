@@ -12,6 +12,12 @@ const GRAVITY = -0.015;
 const JUMP_STRENGTH = 0.35;
 const MOVE_SPEED = 0.12;
 
+// 鬼（エネミー）用の定数
+const ENEMY_SIZE = 0.8;
+const ENEMY_SPEED_WANDER = 0.02; // 徘徊モードの速度
+const ENEMY_SPEED_CHASE = 0.06;  // 突撃モードの速度
+const CATCH_DISTANCE = 0.8;      // ゲームオーバーになる距離
+
 // マップデータ（1: 壁, 0: 床）
 const MAP_DATA = [
     [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -32,6 +38,7 @@ class Game {
         this.initScene();
         this.initMap();
         this.initPlayer();
+        this.initEnemy();
         this.initControls();
         this.animate();
     }
@@ -133,14 +140,32 @@ class Game {
         this.isGrounded = false;
     }
 
+    initEnemy() {
+        const geometry = new THREE.BoxGeometry(ENEMY_SIZE, ENEMY_SIZE, ENEMY_SIZE);
+        this.enemyMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // 赤
+        this.enemy = new THREE.Mesh(geometry, this.enemyMaterial);
+        
+        // 初期位置（プレイヤーから離れた場所）
+        this.enemy.position.set(10, 1, 9);
+        this.scene.add(this.enemy);
+
+        this.enemyVelocity = new THREE.Vector3();
+        // 最初の進行方向をランダムに設定
+        const angle = Math.random() * Math.PI * 2;
+        this.enemyDirection = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+        
+        // 視界判定用のRaycaster
+        this.raycaster = new THREE.Raycaster();
+    }
+
     initControls() {
         this.keys = {};
         window.addEventListener('keydown', (e) => this.keys[e.code] = true);
         window.addEventListener('keyup', (e) => this.keys[e.code] = false);
     }
 
-    checkCollision(nextPos) {
-        const pSize = PLAYER_SIZE / 2;
+    checkCollision(nextPos, size = PLAYER_SIZE) {
+        const pSize = size / 2;
 
         // --- マップ境界外への移動を制限 ---
         const mapMinX = -BLOCK_SIZE / 2;
@@ -170,7 +195,106 @@ class Game {
         return false;
     }
 
+    updateEnemy() {
+        // --- 視界判定 (Raycaster) ---
+        const toPlayer = new THREE.Vector3().subVectors(this.player.position, this.enemy.position);
+        const distanceToPlayer = toPlayer.length();
+        const direction = toPlayer.clone().normalize();
+
+        // Raycasterの設定（鬼の中心からプレイヤーの方向へ）
+        const rayOrigin = this.enemy.position.clone();
+        rayOrigin.y += 0.2; // 足元ではなく少し上から飛ばす
+        this.raycaster.set(rayOrigin, direction);
+
+        // 壁（this.wallMesh）との交差判定
+        const intersects = this.raycaster.intersectObject(this.wallMesh);
+
+        let canSeePlayer = true;
+        if (intersects.length > 0) {
+            // 壁までの距離がプレイヤーまでの距離より近い場合、視界が遮られている
+            if (intersects[0].distance < distanceToPlayer) {
+                canSeePlayer = false;
+            }
+        }
+
+        let speed = 0;
+
+        if (canSeePlayer) {
+            // 【突撃モード】
+            speed = ENEMY_SPEED_CHASE;
+            this.enemyDirection.copy(direction);
+            this.enemyDirection.y = 0; // 水平移動のみ
+            this.enemyDirection.normalize();
+            
+            // 視覚的なフィードバック：色を点滅させる
+            const time = Date.now();
+            if (Math.floor(time / 200) % 2 === 0) {
+                this.enemyMaterial.color.setHex(0xff4500); // オレンジレッド
+            } else {
+                this.enemyMaterial.color.setHex(0x8b0000); // ダークレッド
+            }
+        } else {
+            // 【徘徊モード】
+            speed = ENEMY_SPEED_WANDER;
+            this.enemyMaterial.color.setHex(0xff0000); // 通常の赤
+        }
+
+        // X軸の移動と衝突判定（鬼用）
+        const nextX = this.enemy.position.clone().add(new THREE.Vector3(this.enemyDirection.x * speed, 0, 0));
+        if (!this.checkCollision(nextX, ENEMY_SIZE)) {
+            this.enemy.position.x = nextX.x;
+        } else if (!canSeePlayer) {
+            // 徘徊中で壁にぶつかったらランダムに方向を変える（-90度〜90度）
+            const angle = (Math.random() - 0.5) * Math.PI; 
+            this.enemyDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle + Math.PI / 2).normalize();
+        }
+
+        // Z軸の移動と衝突判定（鬼用）
+        const nextZ = this.enemy.position.clone().add(new THREE.Vector3(0, 0, this.enemyDirection.z * speed));
+        if (!this.checkCollision(nextZ, ENEMY_SIZE)) {
+            this.enemy.position.z = nextZ.z;
+        } else if (!canSeePlayer) {
+            // 徘徊中で壁にぶつかったらランダムに方向を変える
+            const angle = (Math.random() - 0.5) * Math.PI;
+            this.enemyDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle + Math.PI / 2).normalize();
+        }
+
+        // --- 重力処理（鬼用） ---
+        this.enemyVelocity.y += GRAVITY;
+        const nextY = this.enemy.position.clone().add(new THREE.Vector3(0, this.enemyVelocity.y, 0));
+        if (nextY.y < 0.5) {
+            this.enemy.position.y = 0.5;
+            this.enemyVelocity.y = 0;
+        }
+    }
+
+    resetGame() {
+        // プレイヤーの位置をリセット
+        this.player.position.set(1, 1, 1);
+        this.velocity.set(0, 0, 0);
+
+        // 鬼の位置をリセット
+        this.enemy.position.set(10, 1, 9);
+        this.enemyVelocity.set(0, 0, 0);
+        this.enemyMaterial.color.setHex(0xff0000);
+        
+        // 入力状態をリセット
+        this.keys = {};
+    }
+
     update() {
+        // --- 鬼のAI更新 ---
+        this.updateEnemy();
+
+        // --- ゲームオーバー判定 ---
+        // プレイヤーと鬼の中心距離で判定
+        const dist = this.player.position.distanceTo(this.enemy.position);
+        if (dist < CATCH_DISTANCE) {
+            alert("捕まった！ゲームオーバー！");
+            this.resetGame();
+            return; // 以降のフレーム更新をスキップ
+        }
+
         // --- 移動処理 ---
         // 標準的な方向定義（W/↑=前進, S/↓=後退, D/→=右, A/←=左）
         const moveForward = (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) - (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
