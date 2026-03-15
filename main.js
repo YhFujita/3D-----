@@ -1,5 +1,3 @@
-import * as THREE from 'three';
-
 /**
  * 3Dボクセル・ダンジョンゲーム - フェーズ1
  * 軽量化（MeshBasicMaterial, InstancedMesh）を意識したベースシステム
