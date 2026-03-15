@@ -35,58 +35,150 @@ class Game {
     }
 
     /**
-     * ランダムなダンジョンマップを生成
+     * BSP（2分木分割）を用いたダンジョンマップの生成
      */
-    generateRandomMap(width, height, roomCount) {
+    generateRandomMap(width, height) {
         this.mapWidth = width;
         this.mapHeight = height;
-        this.mapData = Array(height).fill(0).map(() => Array(width).fill(1)); // 全て壁(1)で初期化
-        this.floorPositions = []; // 床の座標リスト（キャラの配置用）
+        // 初期状態はすべて壁(1)
+        this.mapData = Array(height).fill(0).map(() => Array(width).fill(1));
+        this.floorPositions = [];
 
-        const rooms = [];
+        const MIN_ROOM_SIZE = 4;
+        const MIN_PARTITION_SIZE = 8;
 
-        // ランダムな部屋を生成
-        for (let i = 0; i < roomCount; i++) {
-            const roomWidth = Math.floor(Math.random() * 4) + 3; // 3〜6
-            const roomHeight = Math.floor(Math.random() * 4) + 3;
-            // 外周(0とwidth-1等)は壁にするため1から配置
-            const roomX = Math.floor(Math.random() * (width - roomWidth - 2)) + 1;
-            const roomZ = Math.floor(Math.random() * (height - roomHeight - 2)) + 1;
+        class Partition {
+            constructor(x, y, w, h) {
+                this.x = x;
+                this.y = y;
+                this.w = w;
+                this.h = h;
+                this.left = null;
+                this.right = null;
+                this.room = null;
+            }
 
-            const room = { x: roomX, z: roomZ, w: roomWidth, h: roomHeight };
-            rooms.push(room);
+            split() {
+                if (this.left || this.right) return false; // 既に分割済み
 
-            // 部屋を床(0)にする
-            for (let z = room.z; z < room.z + room.h; z++) {
-                for (let x = room.x; x < room.x + room.w; x++) {
-                    this.mapData[z][x] = 0;
+                // 分割方向を決定（縦長なら横に、横長なら縦に分割しやすいようにする）
+                let splitH = Math.random() > 0.5;
+                if (this.w > this.h && this.w / this.h >= 1.25) splitH = false;
+                else if (this.h > this.w && this.h / this.w >= 1.25) splitH = true;
+
+                const max = (splitH ? this.h : this.w) - MIN_PARTITION_SIZE;
+                if (max <= MIN_PARTITION_SIZE) return false; // 分割するには小さすぎる
+
+                const splitAt = Math.floor(Math.random() * (max - MIN_PARTITION_SIZE)) + MIN_PARTITION_SIZE;
+
+                if (splitH) {
+                    this.left = new Partition(this.x, this.y, this.w, splitAt);
+                    this.right = new Partition(this.x, this.y + splitAt, this.w, this.h - splitAt);
+                } else {
+                    this.left = new Partition(this.x, this.y, splitAt, this.h);
+                    this.right = new Partition(this.x + splitAt, this.y, this.w - splitAt, this.h);
+                }
+                return true;
+            }
+
+            createRooms() {
+                if (this.left || this.right) {
+                    if (this.left) this.left.createRooms();
+                    if (this.right) this.right.createRooms();
+                } else {
+                    // 区画内に部屋を作る
+                    const roomW = Math.floor(Math.random() * (this.w - MIN_ROOM_SIZE)) + MIN_ROOM_SIZE - 1;
+                    const roomH = Math.floor(Math.random() * (this.h - MIN_ROOM_SIZE)) + MIN_ROOM_SIZE - 1;
+                    const roomX = Math.floor(Math.random() * (this.w - roomW - 1)) + 1;
+                    const roomY = Math.floor(Math.random() * (this.h - roomH - 1)) + 1;
+                    this.room = { x: this.x + roomX, y: this.y + roomY, w: roomW, h: roomH };
+                }
+            }
+
+            getRoom() {
+                if (this.room) return this.room;
+                let lRoom = null, rRoom = null;
+                if (this.left) lRoom = this.left.getRoom();
+                if (this.right) rRoom = this.right.getRoom();
+                if (!lRoom && !rRoom) return null;
+                if (!lRoom) return rRoom;
+                if (!rRoom) return lRoom;
+                return Math.random() > 0.5 ? lRoom : rRoom;
+            }
+        }
+
+        // 1. 区画の分割
+        const root = new Partition(1, 1, width - 2, height - 2);
+        const partitions = [root];
+        let didSplit = true;
+        while (didSplit) {
+            didSplit = false;
+            for (let i = 0; i < partitions.length; i++) {
+                const p = partitions[i];
+                if (!p.left && !p.right) {
+                    if (p.w > MIN_PARTITION_SIZE * 2 || p.h > MIN_PARTITION_SIZE * 2 || Math.random() > 0.2) {
+                        if (p.split()) {
+                            partitions.push(p.left);
+                            partitions.push(p.right);
+                            didSplit = true;
+                        }
+                    }
                 }
             }
         }
 
-        // 部屋同士を通路で繋ぐ
-        for (let i = 0; i < rooms.length - 1; i++) {
-            const roomA = rooms[i];
-            const roomB = rooms[i + 1];
-            const centerA = { x: Math.floor(roomA.x + roomA.w / 2), z: Math.floor(roomA.z + roomA.h / 2) };
-            const centerB = { x: Math.floor(roomB.x + roomB.w / 2), z: Math.floor(roomB.z + roomB.h / 2) };
+        // 2. 部屋の生成
+        root.createRooms();
 
-            // X軸に沿って通路を掘る
-            const minX = Math.min(centerA.x, centerB.x);
-            const maxX = Math.max(centerA.x, centerB.x);
-            for (let x = minX; x <= maxX; x++) {
-                this.mapData[centerA.z][x] = 0;
+        // 3. マップ配列への書き込み（部屋）
+        const writeRoom = (p) => {
+            if (p.room) {
+                for (let z = p.room.y; z < p.room.y + p.room.h; z++) {
+                    for (let x = p.room.x; x < p.room.x + p.room.w; x++) {
+                        this.mapData[z][x] = 0;
+                    }
+                }
+            } else {
+                if (p.left) writeRoom(p.left);
+                if (p.right) writeRoom(p.right);
             }
+        };
+        writeRoom(root);
 
-            // Z軸に沿って通路を掘る
-            const minZ = Math.min(centerA.z, centerB.z);
-            const maxZ = Math.max(centerA.z, centerB.z);
-            for (let z = minZ; z <= maxZ; z++) {
-                this.mapData[z][centerB.x] = 0;
+        // 4. 通路の生成
+        const createHCorridor = (x1, x2, y) => {
+            for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) this.mapData[y][x] = 0;
+        };
+        const createVCorridor = (y1, y2, x) => {
+            for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) this.mapData[y][x] = 0;
+        };
+
+        const connectPartitions = (p) => {
+            if (!p.left || !p.right) return;
+            
+            const roomA = p.left.getRoom();
+            const roomB = p.right.getRoom();
+            
+            if (roomA && roomB) {
+                const centerA = { x: Math.floor(roomA.x + roomA.w / 2), y: Math.floor(roomA.y + roomA.h / 2) };
+                const centerB = { x: Math.floor(roomB.x + roomB.w / 2), y: Math.floor(roomB.y + roomB.h / 2) };
+                
+                // ランダムに横->縦 か 縦->横 で繋ぐ
+                if (Math.random() > 0.5) {
+                    createHCorridor(centerA.x, centerB.x, centerA.y);
+                    createVCorridor(centerA.y, centerB.y, centerB.x);
+                } else {
+                    createVCorridor(centerA.y, centerB.y, centerA.x);
+                    createHCorridor(centerA.x, centerB.x, centerB.y);
+                }
             }
-        }
+            
+            connectPartitions(p.left);
+            connectPartitions(p.right);
+        };
+        connectPartitions(root);
 
-        // 床の座標をリスト化
+        // 5. 床の座標リスト化
         for (let z = 0; z < height; z++) {
             for (let x = 0; x < width; x++) {
                 if (this.mapData[z][x] === 0) {
