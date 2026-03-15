@@ -104,9 +104,28 @@ class Game {
     }
 
     initPlayer() {
+        // プレイヤーのグループ（本体と顔をまとめる）
+        this.player = new THREE.Group();
+
+        // プレイヤー本体（青いキューブ）
         const geometry = new THREE.BoxGeometry(PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE);
         const material = new THREE.MeshBasicMaterial({ color: 0x0000ff });
-        this.player = new THREE.Mesh(geometry, material);
+        const body = new THREE.Mesh(geometry, material);
+        this.player.add(body);
+
+        // 目（顔の方向をわかりやすくするための黒い小さなキューブ）
+        const eyeGeometry = new THREE.BoxGeometry(0.15, 0.15, 0.1);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 }); // 黒
+        
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        // 顔の正面は Z軸のマイナス方向とする
+        leftEye.position.set(-0.2, 0.2, -PLAYER_SIZE / 2 - 0.05); 
+        this.player.add(leftEye);
+
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(0.2, 0.2, -PLAYER_SIZE / 2 - 0.05);
+        this.player.add(rightEye);
+
         this.player.position.set(1, 1, 1);
         this.scene.add(this.player);
 
@@ -171,6 +190,11 @@ class Game {
                 .addScaledVector(right, moveRight)
                 .normalize();
             
+            // プレイヤーを進行方向に向かせる
+            // 現在地から moveVec を足した位置を見るようにする
+            const lookTarget = this.player.position.clone().add(moveVec);
+            this.player.lookAt(lookTarget);
+
             const nextX = this.player.position.clone().add(new THREE.Vector3(moveVec.x * MOVE_SPEED, 0, 0));
             if (!this.checkCollision(nextX)) this.player.position.x = nextX.x;
             
