@@ -18,29 +18,82 @@ const ENEMY_SPEED_WANDER = 0.02; // 徘徊モードの速度
 const ENEMY_SPEED_CHASE = 0.06;  // 突撃モードの速度
 const CATCH_DISTANCE = 0.8;      // ゲームオーバーになる距離
 
-// マップデータ（1: 壁, 0: 床）
-const MAP_DATA = [
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-    [1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1],
-    [1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1],
-    [1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1],
-    [1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1],
-    [1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
-    [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
-    [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
-    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-];
+// マップ生成用の定数
+const MAP_WIDTH = 25;
+const MAP_HEIGHT = 25;
+const ROOM_COUNT = 5;
 
 class Game {
     constructor() {
+        this.generateRandomMap(MAP_WIDTH, MAP_HEIGHT, ROOM_COUNT);
         this.initScene();
         this.initMap();
         this.initPlayer();
         this.initEnemy();
         this.initControls();
         this.animate();
+    }
+
+    /**
+     * ランダムなダンジョンマップを生成
+     */
+    generateRandomMap(width, height, roomCount) {
+        this.mapWidth = width;
+        this.mapHeight = height;
+        this.mapData = Array(height).fill(0).map(() => Array(width).fill(1)); // 全て壁(1)で初期化
+        this.floorPositions = []; // 床の座標リスト（キャラの配置用）
+
+        const rooms = [];
+
+        // ランダムな部屋を生成
+        for (let i = 0; i < roomCount; i++) {
+            const roomWidth = Math.floor(Math.random() * 4) + 3; // 3〜6
+            const roomHeight = Math.floor(Math.random() * 4) + 3;
+            // 外周(0とwidth-1等)は壁にするため1から配置
+            const roomX = Math.floor(Math.random() * (width - roomWidth - 2)) + 1;
+            const roomZ = Math.floor(Math.random() * (height - roomHeight - 2)) + 1;
+
+            const room = { x: roomX, z: roomZ, w: roomWidth, h: roomHeight };
+            rooms.push(room);
+
+            // 部屋を床(0)にする
+            for (let z = room.z; z < room.z + room.h; z++) {
+                for (let x = room.x; x < room.x + room.w; x++) {
+                    this.mapData[z][x] = 0;
+                }
+            }
+        }
+
+        // 部屋同士を通路で繋ぐ
+        for (let i = 0; i < rooms.length - 1; i++) {
+            const roomA = rooms[i];
+            const roomB = rooms[i + 1];
+            const centerA = { x: Math.floor(roomA.x + roomA.w / 2), z: Math.floor(roomA.z + roomA.h / 2) };
+            const centerB = { x: Math.floor(roomB.x + roomB.w / 2), z: Math.floor(roomB.z + roomB.h / 2) };
+
+            // X軸に沿って通路を掘る
+            const minX = Math.min(centerA.x, centerB.x);
+            const maxX = Math.max(centerA.x, centerB.x);
+            for (let x = minX; x <= maxX; x++) {
+                this.mapData[centerA.z][x] = 0;
+            }
+
+            // Z軸に沿って通路を掘る
+            const minZ = Math.min(centerA.z, centerB.z);
+            const maxZ = Math.max(centerA.z, centerB.z);
+            for (let z = minZ; z <= maxZ; z++) {
+                this.mapData[z][centerB.x] = 0;
+            }
+        }
+
+        // 床の座標をリスト化
+        for (let z = 0; z < height; z++) {
+            for (let x = 0; x < width; x++) {
+                if (this.mapData[z][x] === 0) {
+                    this.floorPositions.push(new THREE.Vector3(x * BLOCK_SIZE, 0, z * BLOCK_SIZE));
+                }
+            }
+        }
     }
 
     /**
@@ -78,7 +131,7 @@ class Game {
 
         let wallCount = 0;
         let floorCount = 0;
-        MAP_DATA.forEach(row => row.forEach(val => {
+        this.mapData.forEach(row => row.forEach(val => {
             if (val === 1) wallCount++;
             else floorCount++;
         }));
@@ -90,7 +143,7 @@ class Game {
         let floorIdx = 0;
         const dummy = new THREE.Object3D();
 
-        MAP_DATA.forEach((row, z) => {
+        this.mapData.forEach((row, z) => {
             row.forEach((type, x) => {
                 this.createBlock(x, 0, z, 0, dummy, this.floorMesh, floorIdx++);
                 if (type === 1) {
@@ -108,6 +161,21 @@ class Game {
         dummy.position.set(x * BLOCK_SIZE, y, z * BLOCK_SIZE);
         dummy.updateMatrix();
         instancedMesh.setMatrixAt(index, dummy.matrix);
+    }
+
+    /**
+     * ランダムな床の座標を取得する（指定座標から一定距離離すことも可能）
+     */
+    getSpawnPosition(minDistFrom = null) {
+        let pos;
+        let attempts = 0;
+        do {
+            const idx = Math.floor(Math.random() * this.floorPositions.length);
+            pos = this.floorPositions[idx].clone();
+            pos.y = 1; // ブロックの上の高さ
+            attempts++;
+        } while (minDistFrom && pos.distanceTo(minDistFrom) < 10 && attempts < 50);
+        return pos;
     }
 
     initPlayer() {
@@ -133,7 +201,7 @@ class Game {
         rightEye.position.set(0.2, 0.2, PLAYER_SIZE / 2 + 0.05);
         this.player.add(rightEye);
 
-        this.player.position.set(1, 1, 1);
+        this.player.position.copy(this.getSpawnPosition());
         this.scene.add(this.player);
 
         this.velocity = new THREE.Vector3();
@@ -146,7 +214,7 @@ class Game {
         this.enemy = new THREE.Mesh(geometry, this.enemyMaterial);
         
         // 初期位置（プレイヤーから離れた場所）
-        this.enemy.position.set(10, 1, 9);
+        this.enemy.position.copy(this.getSpawnPosition(this.player.position));
         this.scene.add(this.enemy);
 
         this.enemyVelocity = new THREE.Vector3();
@@ -169,9 +237,9 @@ class Game {
 
         // --- マップ境界外への移動を制限 ---
         const mapMinX = -BLOCK_SIZE / 2;
-        const mapMaxX = (MAP_DATA[0].length - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
+        const mapMaxX = (this.mapWidth - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
         const mapMinZ = -BLOCK_SIZE / 2;
-        const mapMaxZ = (MAP_DATA.length - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
+        const mapMaxZ = (this.mapHeight - 1) * BLOCK_SIZE + BLOCK_SIZE / 2;
 
         if (nextPos.x - pSize < mapMinX || nextPos.x + pSize > mapMaxX ||
             nextPos.z - pSize < mapMinZ || nextPos.z + pSize > mapMaxZ) {
