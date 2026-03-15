@@ -258,15 +258,36 @@ class Game {
     /**
      * ランダムな床の座標を取得する（指定座標から一定距離離すことも可能）
      */
-    getSpawnPosition(minDistFrom = null) {
+    getSpawnPosition(minDistFrom = null, requireOpenSpace = true) {
         let pos;
         let attempts = 0;
+        
+        // 周囲8マスがすべて床である「安全な床」のリストを作成
+        let safePositions = [];
+        if (requireOpenSpace) {
+            for (let z = 1; z < this.mapHeight - 1; z++) {
+                for (let x = 1; x < this.mapWidth - 1; x++) {
+                    if (this.mapData[z][x] === 0 &&
+                        this.mapData[z-1][x] === 0 && this.mapData[z+1][x] === 0 &&
+                        this.mapData[z][x-1] === 0 && this.mapData[z][x+1] === 0 &&
+                        this.mapData[z-1][x-1] === 0 && this.mapData[z-1][x+1] === 0 &&
+                        this.mapData[z+1][x-1] === 0 && this.mapData[z+1][x+1] === 0) {
+                        safePositions.push(new THREE.Vector3(x * BLOCK_SIZE, 0, z * BLOCK_SIZE));
+                    }
+                }
+            }
+        }
+
+        // 安全な床がない場合（細い通路しかない等）は、すべての床を候補にする
+        const candidates = safePositions.length > 0 ? safePositions : this.floorPositions;
+
         do {
-            const idx = Math.floor(Math.random() * this.floorPositions.length);
-            pos = this.floorPositions[idx].clone();
-            pos.y = 1; // ブロックの上の高さ
+            const idx = Math.floor(Math.random() * candidates.length);
+            pos = candidates[idx].clone();
+            pos.y = 1; // 空中（ブロックの上）から落下させる
             attempts++;
         } while (minDistFrom && pos.distanceTo(minDistFrom) < 10 && attempts < 50);
+        
         return pos;
     }
 
