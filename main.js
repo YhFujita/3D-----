@@ -25,13 +25,30 @@ const ROOM_COUNT = 5;
 
 class Game {
     constructor() {
+        this.floorLevel = 1;
         this.generateRandomMap(MAP_WIDTH, MAP_HEIGHT, ROOM_COUNT);
         this.initScene();
         this.initMap();
         this.initPlayer();
         this.initEnemy();
+        this.initGoal();
         this.initControls();
         this.animate();
+    }
+
+    /**
+     * ゴールの配置
+     */
+    initGoal() {
+        const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+        this.goalMaterial = new THREE.MeshBasicMaterial({ color: 0xffd700 }); // ゴールド
+        this.goal = new THREE.Mesh(geometry, this.goalMaterial);
+        
+        // プレイヤーの初期位置から離れた安全な床をゴールにする
+        const goalPos = this.getSpawnPosition(this.player.position, true);
+        this.goal.position.copy(goalPos);
+        this.goal.position.y = 0.5; // 床の上に少し浮かせる
+        this.scene.add(this.goal);
     }
 
     /**
@@ -451,19 +468,76 @@ class Game {
 
     resetGame() {
         // プレイヤーの位置をリセット
-        this.player.position.set(1, 1, 1);
+        this.player.position.copy(this.getSpawnPosition());
         this.velocity.set(0, 0, 0);
 
         // 鬼の位置をリセット
-        this.enemy.position.set(10, 1, 9);
+        this.enemy.position.copy(this.getSpawnPosition(this.player.position));
         this.enemyVelocity.set(0, 0, 0);
         this.enemyMaterial.color.setHex(0xff0000);
+        
+        // 鬼の進行方向をリセット
+        const angle = Math.random() * Math.PI * 2;
+        this.enemyDirection.set(Math.cos(angle), 0, Math.sin(angle)).normalize();
         
         // 入力状態をリセット
         this.keys = {};
     }
 
+    nextFloor() {
+        this.floorLevel++;
+        document.getElementById('floor-level').innerText = `現在の階: ${this.floorLevel}階`;
+
+        // --- 超重要: 古いマップのメモリ解放 (Dispose処理) ---
+        // 1. Scene から取り除く
+        this.scene.remove(this.wallMesh);
+        this.scene.remove(this.floorMesh);
+        
+        // 2. Geometry と Material をメモリから解放する
+        this.wallMesh.geometry.dispose();
+        this.wallMesh.material.dispose();
+        this.floorMesh.geometry.dispose();
+        this.floorMesh.material.dispose();
+        
+        // 衝突判定用ブロックリストをリセット
+        this.blocks = [];
+
+        // --- 新しいマップの生成と配置 ---
+        this.generateRandomMap(MAP_WIDTH, MAP_HEIGHT, ROOM_COUNT);
+        this.initMap(); // 新しい InstancedMesh が生成・追加される
+
+        // --- ゴールの再配置 ---
+        const goalPos = this.getSpawnPosition(this.player.position, true);
+        this.goal.position.copy(goalPos);
+        this.goal.position.y = 0.5;
+
+        // --- キャラクターの配置と状態リセット ---
+        this.player.position.copy(this.getSpawnPosition());
+        this.velocity.set(0, 0, 0);
+
+        this.enemy.position.copy(this.getSpawnPosition(this.player.position));
+        this.enemyVelocity.set(0, 0, 0);
+        this.enemyMaterial.color.setHex(0xff0000);
+
+        // 鬼の進行方向をリセット
+        const angle = Math.random() * Math.PI * 2;
+        this.enemyDirection.set(Math.cos(angle), 0, Math.sin(angle)).normalize();
+
+        // 入力のリセット
+        this.keys = {};
+    }
+
     update() {
+        // --- ゴール判定 ---
+        const distToGoal = this.player.position.distanceTo(this.goal.position);
+        if (distToGoal < 1.0) {
+            this.nextFloor();
+            return; // 階層移動したフレームは以降の処理をスキップ
+        }
+
+        // ゴールを少しずつ回転させる演出
+        this.goal.rotation.y += 0.02;
+
         // --- 鬼のAI更新 ---
         this.updateEnemy();
 
