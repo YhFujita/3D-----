@@ -3,6 +3,8 @@
  * 軽量化（MeshBasicMaterial, InstancedMesh）を意識したベースシステム
  */
 
+import * as THREE from 'three';
+
 // --- 定数 ---
 const BLOCK_SIZE = 1.0;
 const PLAYER_SIZE = 0.8;
