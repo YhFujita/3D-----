@@ -118,12 +118,12 @@ class Game {
         const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 }); // 黒
         
         const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        // 顔の正面は Z軸のマイナス方向とする
-        leftEye.position.set(-0.2, 0.2, -PLAYER_SIZE / 2 - 0.05); 
+        // Three.js の lookAt はローカルの +Z 軸をターゲットに向けるため、目は +Z 側に配置する
+        leftEye.position.set(-0.2, 0.2, PLAYER_SIZE / 2 + 0.05); 
         this.player.add(leftEye);
 
         const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-        rightEye.position.set(0.2, 0.2, -PLAYER_SIZE / 2 - 0.05);
+        rightEye.position.set(0.2, 0.2, PLAYER_SIZE / 2 + 0.05);
         this.player.add(rightEye);
 
         this.player.position.set(1, 1, 1);
